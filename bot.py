@@ -1,65 +1,58 @@
-import telebot
 import os
-import json
+import telebot
+from flask import Flask, request
 
-TOKEN = os.getenv("BOT_TOKEN")  # Bot token from GitHub Secrets
-ADMIN_IDS = os.getenv("ADMIN_IDS").split(",")  # Multiple admin IDs
+# Load Environment Variables
+TOKEN = os.getenv("BOT_TOKEN")  # Telegram Bot Token
+APP_URL = os.getenv("APP_URL")  # Render App URL
+ADMIN_IDS = os.getenv("ADMIN_IDS", "").split(",")  # Multi-Admin Support
 
-PORT = int(os.getenv("PORT", 8080))  # Default to 5000 if no port is set
-
+# Initialize Bot
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
-LOG_FILE = "messages_log.json"
+# Start Command
+@bot.message_handler(commands=['start'])
+def start(message):
+    user_id = message.from_user.id
+    bot.reply_to(message, f"Hello {message.from_user.first_name}! 👋\nI'm here to help you communicate easily.")
 
-# Load message log
-def load_logs():
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "r") as file:
-            return json.load(file)
-    return {}
-
-# Save message log
-def save_log(user_id, message):
-    logs = load_logs()
-    logs[str(user_id)] = message
-    with open(LOG_FILE, "w") as file:
-        json.dump(logs, file)
-
-# Handle user messages and forward them to admins
+# Handle Messages
 @bot.message_handler(func=lambda message: True)
-def forward_to_admin(message):
-    save_log(message.chat.id, message.text)
-    
-    keyboard = telebot.types.InlineKeyboardMarkup()
-    reply_button = telebot.types.InlineKeyboardButton(text="Reply", callback_data=f"reply_{message.chat.id}")
-    keyboard.add(reply_button)
+def handle_messages(message):
+    user_id = message.from_user.id
+    text = message.text
+    bot.reply_to(message, f"📩 You said: {text}")
 
-    for admin_id in ADMIN_IDS:
-        bot.send_message(admin_id, f"📩 New Message from {message.chat.id}: {message.text}", reply_markup=keyboard)
-    
-    bot.send_message(message.chat.id, "📨 Your message has been sent to the admin!")
-
-# Handle admin replies
-@bot.callback_query_handler(func=lambda call: call.data.startswith("reply_"))
-def admin_reply(call):
-    user_id = call.data.split("_")[1]
-    bot.send_message(call.message.chat.id, f"📝 Reply to user {user_id}:")
-    
-    @bot.message_handler(func=lambda msg: msg.chat.id == int(call.message.chat.id))
-    def send_reply(msg):
-        bot.send_message(user_id, f"📬 Admin: {msg.text}")
-        bot.send_message(msg.chat.id, "✅ Reply sent successfully!")
-        bot.message_handler(None)
-
-# Admin panel for viewing logs
-@bot.message_handler(commands=['logs'])
-def show_logs(message):
-    if str(message.chat.id) not in ADMIN_IDS:
-        bot.send_message(message.chat.id, "❌ You are not authorized!")
+# Admin Command: Broadcast Message
+@bot.message_handler(commands=['broadcast'])
+def broadcast(message):
+    if str(message.from_user.id) not in ADMIN_IDS:
+        bot.reply_to(message, "❌ You are not an admin!")
         return
-    
-    logs = load_logs()
-    log_text = "\n".join([f"{user}: {msg}" for user, msg in logs.items()])
-    bot.send_message(message.chat.id, f"📜 Message Logs:\n{log_text}")
 
-bot.polling()
+    text = message.text.replace("/broadcast ", "")
+    if not text:
+        bot.reply_to(message, "⚠️ Please provide a message to broadcast.")
+        return
+
+    bot.send_message(message.chat.id, f"📢 Broadcasting: {text}")
+
+# Webhook Endpoint
+@app.route(f"/{TOKEN}", methods=['POST'])
+def webhook():
+    json_str = request.get_data().decode('UTF-8')
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
+
+# Root Endpoint
+@app.route("/")
+def index():
+    return "🤖 Bot is running!"
+
+# Set Webhook on Startup
+if __name__ == "__main__":
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{APP_URL}/{TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
