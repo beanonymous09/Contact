@@ -5,6 +5,8 @@ import json
 TOKEN = os.getenv("BOT_TOKEN")  # Bot token from GitHub Secrets
 ADMIN_IDS = os.getenv("ADMIN_IDS").split(",")  # Multiple admin IDs
 
+PORT = int(os.getenv("PORT", 8080))  # Default to 5000 if no port is set
+
 bot = telebot.TeleBot(TOKEN)
 
 LOG_FILE = "messages_log.json"
